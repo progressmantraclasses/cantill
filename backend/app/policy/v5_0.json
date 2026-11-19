@@ -1,0 +1,99 @@
+{
+  "version": "5.0",
+  "title": "Corvo Engineering Procurement Policy (PR to PO)",
+  "document_ref": "CORVO-PROC-POL-04",
+  "effective_from": "2026-04-01",
+  "params": {
+    "eligible_supplier_statuses": ["Active"],
+    "clubbing": {
+      "clause": "2.2",
+      "keys": ["item_code", "plant"],
+      "created_within_days": 14,
+      "need_by_within_days": 7
+    },
+    "valuation": {
+      "clause": "3.1",
+      "last_po_window_days": 365
+    },
+    "preferred": {
+      "clause": "6",
+      "po_window_days": 548,
+      "recency_bands": [[90, 1.0], [365, 0.5]],
+      "weights": {
+        "po_count": 0.30,
+        "recency": 0.25,
+        "contract": 0.20,
+        "on_time": 0.10,
+        "quality": 0.15
+      },
+      "topup_weights": {"on_time": 0.5, "quality": 0.5}
+    },
+    "consolidation": {
+      "clause": "7.1",
+      "keys": ["supplier_id", "plant", "route"],
+      "window_hours": 24
+    },
+    "matching": {
+      "clause": "1.1",
+      "min_score": 0.6,
+      "abbreviations": {
+        "brg": "bearing",
+        "hyd": "hydraulic",
+        "pneu": "pneumatic",
+        "rod": "electrode"
+      },
+      "noise_phrases": ["for maintenance", "as per sample", "urgent", "repeat"]
+    }
+  },
+  "rules": [
+    {
+      "id": "1.2",
+      "title": "New item (not in item master) always goes to sourcing",
+      "when": {"fact": "is_new_item", "op": "eq", "value": true},
+      "then": {"decision": "SOURCING_REQUEST", "route": "NEW_ITEM_SOURCING", "supplier": "none", "suggest": 0}
+    },
+    {
+      "id": "5.1",
+      "title": "Capex items go to sourcing with 5 suggested suppliers",
+      "when": {"fact": "item_type", "op": "eq", "value": "Capex"},
+      "then": {"decision": "SOURCING_REQUEST", "route": "CAPEX_SOURCING", "supplier": "none", "suggest": 5, "flags": ["capex_approval_needed"]}
+    },
+    {
+      "id": "5.2",
+      "title": "Usable rate contract: PO at contract rate",
+      "when": {"fact": "contract_usable", "op": "eq", "value": true},
+      "then": {"decision": "PO", "route": "CONTRACT_PO", "supplier": "contract", "suggest": 0}
+    },
+    {
+      "id": "5.3",
+      "title": "Emergency, value up to 5,00,000 and bought from an Active supplier in the last 365 days",
+      "when": {"all": [
+        {"fact": "is_emergency", "op": "eq", "value": true},
+        {"fact": "value", "op": "lte", "value": 500000},
+        {"fact": "days_since_active_purchase", "op": "lte", "value": 365}
+      ]},
+      "then": {"decision": "PO", "route": "EMERGENCY_PO", "supplier": "preferred_1", "suggest": 0}
+    },
+    {
+      "id": "5.4",
+      "title": "Value below 2,00,000 and bought from an Active supplier in the last 365 days",
+      "when": {"all": [
+        {"fact": "value", "op": "lt", "value": 200000},
+        {"fact": "days_since_active_purchase", "op": "lte", "value": 365}
+      ]},
+      "then": {"decision": "PO", "route": "SPOT_PO", "supplier": "preferred_1", "suggest": 0}
+    },
+    {
+      "id": "5.5",
+      "title": "Value below 10,00,000: request for quotation to 3 suppliers",
+      "when": {"fact": "value", "op": "lt", "value": 1000000},
+      "then": {"decision": "SOURCING_REQUEST", "route": "RFQ", "supplier": "none", "suggest": 3}
+    },
+    {
+      "id": "5.6",
+      "title": "Value 10,00,000 or more: request for proposal to 5 suppliers",
+      "when": {"fact": "value", "op": "gte", "value": 1000000},
+      "then": {"decision": "SOURCING_REQUEST", "route": "RFP", "supplier": "none", "suggest": 5}
+    }
+  ]
+}

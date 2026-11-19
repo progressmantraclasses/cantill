@@ -1,0 +1,29 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: corvo
+      POSTGRES_PASSWORD: corvo
+      POSTGRES_DB: corvo
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U corvo"]
+      interval: 3s
+      retries: 20
+
+  backend:
+    build: { context: ., dockerfile: backend/Dockerfile }
+    environment:
+      DATABASE_URL: postgresql://corvo:corvo@db:5432/corvo
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+    depends_on: { db: { condition: service_healthy } }
+    ports: ["8000:8000"]
+
+  frontend:
+    build: { context: ., dockerfile: frontend/Dockerfile }
+    depends_on: [backend]
+    ports: ["8080:80"]
+
+volumes:
+  pgdata:
