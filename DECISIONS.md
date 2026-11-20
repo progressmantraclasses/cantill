@@ -38,8 +38,14 @@ with ineligible suppliers.
 | Plant not in plant master, e.g. `PUN2` (PR-26-00173) | NOT_PROCESSED | The policy applies to PUN1/CHK1 only. Guessing the plant could put a PO on the wrong site. |
 | Missing/invalid quantity, dates, pr_no, or neither item code nor description | NOT_PROCESSED with the exact reason | Cannot be valued or clubbed. |
 | Duplicate `pr_no`+`pr_line` | The second one is NOT_PROCESSED | Same key twice is a data error, not a second need. |
+| Empty `urgency` | Treated as Normal | 2.3 makes a line an emergency only when it is *marked* Emergency. |
 
 Each gets a reason in the export so a buyer can fix and resubmit. They are never silently dropped (186 in, 186 out).
+
+**Whole file rejected, nothing stored:** a file that is not UTF-8 text, lacks a required column (`pr_no, pr_line,
+created_at, plant, quantity, need_by_date`, and `item_code` or `description`) or has no rows. That is the wrong file, not
+186 bad lines; marking every line NOT_PROCESSED would hide the real problem. The message names the missing columns.
+`requester, department, uom, estimated_unit_price, urgency` are optional.
 
 ## C. Matching items (policy 1.1)
 
@@ -89,6 +95,8 @@ Each gets a reason in the export so a buyer can fix and resubmit. They are never
   so group value and unit price can differ slightly (examples 7 and 8 show exactly this).
 * A contract rate is used as given (no UoM conversion).
 * Ceiling test is `consumed + value ≤ cap` (inclusive, as written "must not exceed").
+* A contract added in the app must have a ceiling > 0, `0 ≤ consumed ≤ ceiling`, end ≥ start, a known supplier and items,
+  and every rate > 0. A contract that breaks these cannot be applied correctly, so it is refused rather than flagged.
 
 ## F. Decision rules (policy 5)
 
@@ -131,7 +139,7 @@ Each gets a reason in the export so a buyer can fix and resubmit. They are never
 * Reviews are keyed by the requirement's set of PR lines, so reprocessing a batch under a new policy keeps earlier actions
   that still refer to the same lines.
 
-## J. Chat intake
+## J. Chat intake and manual PR form
 
 * The LLM (if configured) only extracts fields; replies are templated and dates are resolved in code against today's
   date (IST), so "next Friday" is deterministic. With no API key a regex extractor does the same job.
@@ -140,6 +148,10 @@ Each gets a reason in the export so a buyer can fix and resubmit. They are never
 * Chat PRs are appended to one rolling "Chat requests" batch and the engine re-runs over it, so chat PRs club with each
   other (people split needs by chat too).
 * A need-by date in the past is refused.
+* **Manual PR form** (for people who prefer a form): the same fields the chat collects, the same checks, the same batch and
+  the same engine run, so a PR gets the same decision whichever way it is raised. The item must be picked from the master or
+  explicitly marked *new*; it is never guessed from text. Numbers are `PR-CH-nnnn` (chat) and `PR-MN-nnnn` (form) from one
+  shared counter, so they never collide.
 
 ## K. Preferred supplier export
 
