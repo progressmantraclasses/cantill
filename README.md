@@ -207,6 +207,8 @@ curl -X POST -H "X-User: me" -H "X-Role: Buyer" \
    Tables and seed data are created on first start.
 3. **Vercel** — import this repo; project root `frontend`, framework **Vite**,
    env `VITE_API_URL=https://<render-service>.onrender.com`.
+   `frontend/vercel.json` sends every path to `index.html`, so refreshing or opening a deep link such as `/workspace`
+   works (without it Vercel returns 404 for client-side routes).
 
 Then put both URLs at the top of this README.
 
@@ -232,6 +234,7 @@ cantill/
 │   ├── src/pages/         one file per screen
 │   ├── src/api.js         API client (uses VITE_API_URL)
 │   ├── nginx.conf         static serving in the Docker image
+│   ├── vercel.json        SPA fallback on Vercel (refresh / deep links)
 │   └── Dockerfile
 ├── data/                  kit data the app seeds from (master_data, contracts, pr_batches)
 ├── *.pdf                  original task brief, policy v5.0 and worked examples
