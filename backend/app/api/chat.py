@@ -8,8 +8,8 @@ from sqlalchemy import select
 from sqlalchemy.orm.attributes import flag_modified
 
 from .. import models as m
-from ..models import Session
-from ..seed import load_master_from_db, load_policies_from_db
+from ..database import Session
+from ..repository import load_master_from_db, policy_on
 from ..services import batches as bsvc
 from ..services import chat as chatsvc
 from ..services.llm import llm
@@ -18,12 +18,92 @@ from .common import actor, err
 bp = Blueprint("chat", __name__, url_prefix="/api/chat")
 
 
+NUMBER = r"(\d[\d,]*(?:\.\d+)?)"
+ITEM_CODE_RE = re.compile(r"ITM-\d{4}")
+RESET_RE = re.compile(r"(cancel|reset|start over|new request|clear)")
+CONFIRM_RE = re.compile(r"(yes|y|ok|okay|confirm|correct|confirmed|go ahead|submit)[.! ]*")
+
+
 def _items_and_params():
     md = load_master_from_db(Session)
-    pols = load_policies_from_db(Session)
-    from ..engine.pipeline import select_policy
-    pol = select_policy(pols, bsvc.now_ist().date())
+    pol = policy_on(Session, bsvc.now_ist().date())
     return md.items, pol["params"].get("matching")
+
+
+def _to_number(s: str) -> float:
+    return float(s.replace(",", ""))
+
+
+def _answer_pending_question(state: str, text: str, low: str, slots: dict, items: dict, today) -> bool:
+    """Treat the message as a direct answer to the question the assistant last asked. True if it was one."""
+    if state == "choose_item":
+        opts = slots.pop("options", None) or []
+        pick = None
+        if m_ := re.fullmatch(r"\s*#?(\d)\s*\.?", low):
+            i = int(m_[1]) - 1
+            pick = opts[i]["item_code"] if 0 <= i < len(opts) else None
+        elif m_ := ITEM_CODE_RE.search(text.upper()):
+            pick = m_[0] if m_[0] in items else None
+        if pick:
+            slots["item_code"] = pick
+            return True
+        if re.search(r"\b(none|neither|no|other|something else|new)\b", low):
+            slots["is_new"] = True
+            return True
+        return False
+
+    if state == "unknown_item" and re.search(r"\b(new item|yes|new|raise it|go ahead|ok|okay)\b", low):
+        slots["is_new"] = True
+        price = chatsvc.regex_extract(text).get("est_unit_price")
+        if price is not None:
+            slots["est_unit_price"] = price
+        return True
+
+    if state == "need_estimate":
+        if re.search(r"unknown|don'?t know|no idea|not sure|skip", low):
+            slots["est_unit_price"], slots["est_asked"] = None, True
+            return True
+        if m_ := re.search(NUMBER, text):
+            slots["est_unit_price"] = _to_number(m_[1])
+            return True
+        return False
+
+    if state == "need_quantity" and (m_ := re.fullmatch(rf"\s*{NUMBER}\s*(?:[a-zA-Z]+)?\s*", text)):
+        slots["quantity"] = _to_number(m_[1])
+        return True
+
+    if state == "need_plant" and (plant := chatsvc.regex_extract(text).get("plant")):
+        slots["plant"] = plant
+        return True
+
+    if state == "need_date" and (d := chatsvc.parse_date(text, today)):
+        slots["need_by"] = d.isoformat()
+        return True
+
+    return False
+
+
+def _merge_free_text(state: str, text: str, low: str, slots: dict, items: dict, today) -> None:
+    """Extract whatever slots a free-form message mentions and merge them in."""
+    x = chatsvc.extract(text, today, llm)
+    if x.get("item_text"):
+        if state != "confirm":
+            # a new item description replaces the old one and clears any earlier item resolution
+            if x["item_text"] != slots.get("item_text"):
+                for k in ("item_code", "is_new", "est_asked"):
+                    slots.pop(k, None)
+            slots["item_text"] = x["item_text"]
+        elif re.search(r"ITM-\d{4}|change item", text, re.I):
+            slots["item_text"] = x["item_text"]
+            slots.pop("item_code", None)
+    if (m_ := ITEM_CODE_RE.search(text.upper())) and m_[0] in items:
+        slots["item_code"] = m_[0]
+        slots.setdefault("item_text", items[m_[0]]["description"])
+    for k in ("quantity", "plant", "need_by", "urgency", "est_unit_price"):
+        if x.get(k) is not None:
+            slots[k] = x[k]
+    if state == "confirm" and re.search(r"\bnot urgent|normal\b", low):
+        slots["urgency"] = "Normal"
 
 
 def _save(sess: m.ChatSession, role: str, text: str, extra: dict | None = None):
@@ -50,77 +130,18 @@ def turn():
     low = text.lower().strip()
     _save(sess, "user", text)
 
-    if re.fullmatch(r"(cancel|reset|start over|new request|clear)", low):
+    if RESET_RE.fullmatch(low):
         sess.slots, sess.state = {}, "collecting"
         _save(sess, "assistant", "Okay, cleared. What do you need to buy?")
         Session.commit()
         return jsonify(_resp(sess, {"reply": "Okay, cleared. What do you need to buy?", "state": "need_item"}))
 
     state = sess.state
-    handled = False
-    if state == "choose_item":
-        opts = slots.get("options", [])
-        pick = None
-        if m_ := re.fullmatch(r"\s*#?(\d)\s*\.?", low):
-            i = int(m_[1]) - 1
-            pick = opts[i]["item_code"] if 0 <= i < len(opts) else None
-        elif m_ := re.search(r"ITM-\d{4}", text.upper()):
-            pick = m_[0] if m_[0] in items else None
-        if pick:
-            slots["item_code"] = pick
-            handled = True
-        elif re.search(r"\b(none|neither|no|other|something else|new)\b", low):
-            slots["is_new"], handled = True, True
-        slots.pop("options", None)
-    elif state == "unknown_item" and re.search(r"\b(new item|yes|new|raise it|go ahead|ok|okay)\b", low):
-        slots["is_new"], handled = True, True
-        if (x := chatsvc.regex_extract(text)).get("est_unit_price") is not None:
-            slots["est_unit_price"] = x["est_unit_price"]
-    elif state == "need_estimate":
-        if re.search(r"unknown|don'?t know|no idea|not sure|skip", low):
-            slots["est_unit_price"] = None
-            slots["est_asked"] = True
-            handled = True
-        elif m_ := re.search(r"(\d[\d,]*(?:\.\d+)?)", text):
-            slots["est_unit_price"], handled = float(m_[1].replace(",", "")), True
-    elif state == "need_quantity" and (m_ := re.fullmatch(r"\s*(\d[\d,]*(?:\.\d+)?)\s*(?:[a-zA-Z]+)?\s*", text)):
-        slots["quantity"], handled = float(m_[1].replace(",", "")), True
-    elif state == "need_plant":
-        x = chatsvc.regex_extract(text)
-        if x.get("plant"):
-            slots["plant"], handled = x["plant"], True
-    elif state == "need_date":
-        d = chatsvc.parse_date(text, today)
-        if d:
-            slots["need_by"], handled = d.isoformat(), True
-    elif state == "confirm" and re.fullmatch(r"(yes|y|ok|okay|confirm|correct|confirmed|go ahead|submit)[.! ]*", low):
+    if state == "confirm" and CONFIRM_RE.fullmatch(low):
         sess.slots = slots
         return _confirm(sess, who)
-
-    if not handled:
-        x = chatsvc.extract(text, today, llm)
-        # a new item description replaces the old one and clears any earlier item resolution
-        if x.get("item_text") and state not in ("confirm",):
-            if x["item_text"] != slots.get("item_text"):
-                slots.pop("item_code", None)
-                slots.pop("is_new", None)
-                slots.pop("est_asked", None)
-            slots["item_text"] = x["item_text"]
-        elif x.get("item_text") and state == "confirm" and re.search(r"ITM-\d{4}|change item", text, re.I):
-            slots["item_text"] = x["item_text"]
-            slots.pop("item_code", None)
-        if m_ := re.search(r"ITM-\d{4}", text.upper()):
-            if m_[0] in items:
-                slots["item_code"] = m_[0]
-                slots.setdefault("item_text", items[m_[0]]["description"])
-        for k in ("quantity", "plant", "need_by", "urgency", "est_unit_price"):
-            if x.get(k) is not None:
-                slots[k] = x[k]
-        if state == "confirm":
-            if re.search(r"\b(make it|change (?:it )?to|quantity|qty)\b", low) and "quantity" not in x:
-                pass
-            if re.search(r"\bnot urgent|normal\b", low):
-                slots["urgency"] = "Normal"
+    if not _answer_pending_question(state, text, low, slots, items, today):
+        _merge_free_text(state, text, low, slots, items, today)
 
     step = chatsvc.next_step(slots, items, mparams, today)
     slots["options"] = step.get("options") if step["state"] == "choose_item" else None

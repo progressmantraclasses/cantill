@@ -9,8 +9,8 @@ from sqlalchemy import select
 
 from .. import models as m
 from ..engine import preferred as pref
-from ..models import Session
-from ..seed import load_master_from_db, load_policies_from_db
+from ..database import Session
+from ..repository import load_master_from_db, policy_on
 from ..services import batches as bsvc
 from ..services import contract_extract as ce
 from ..services.llm import llm
@@ -225,9 +225,7 @@ def preferred_suppliers():
     except ValueError:
         return err("as_of must be YYYY-MM-DD")
     md = load_master_from_db(Session)
-    policies = load_policies_from_db(Session)
-    from ..engine.pipeline import select_policy
-    pol = select_policy(policies, as_of, request.args.get("policy_version"))
+    pol = policy_on(Session, as_of, request.args.get("policy_version"))
     params = pol["params"]
     statuses = tuple(params.get("eligible_supplier_statuses", ["Active"]))
     item_filter = request.args.get("item_code")

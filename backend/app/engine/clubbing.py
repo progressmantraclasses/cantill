@@ -1,8 +1,6 @@
 """Policy 2: club similar PR lines into requirements (no splitting)."""
 from __future__ import annotations
 
-from datetime import timedelta
-
 
 def club(lines: list[dict], params: dict) -> list[dict]:
     """`lines` need: item (resolved code or None), plant, created_at, need_by, pr_no, pr_line, urgency.

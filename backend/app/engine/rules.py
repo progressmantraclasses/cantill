@@ -1,8 +1,6 @@
 """Generic rule evaluator. Rules are DATA (policy JSON); this module has no business constants."""
 from __future__ import annotations
 
-from typing import Any
-
 OPS = {
     "eq": lambda a, b: a == b,
     "ne": lambda a, b: a != b,

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import copy
 from collections import Counter
 from datetime import date
 
@@ -8,10 +7,11 @@ from flask import Blueprint, jsonify, request
 from sqlalchemy import select
 
 from .. import models as m
+from ..database import Session
 from ..engine import pipeline
-from ..models import Session
+from ..engine.rules import FACT_CATALOGUE, OPS
 from ..policy import amend, diff as pdiff, normalise_policy, schema
-from ..seed import load_master_from_db, load_policies_from_db
+from ..repository import load_master_from_db, load_policies_from_db
 from ..services import batches as bsvc
 from ..services.llm import llm
 from .common import actor, err, require_role
@@ -227,6 +227,5 @@ def reject_draft(pid):
 @bp.get("/catalogue")
 def catalogue():
     """What a rule can refer to: lets the manual editor offer valid facts, operators and routes."""
-    from ..engine.rules import FACT_CATALOGUE, OPS
     return jsonify({"facts": FACT_CATALOGUE, "operators": list(OPS) + ["exists"], "routes": schema.ROUTES,
                     "suppliers": ["contract", "preferred_1", "none"]})

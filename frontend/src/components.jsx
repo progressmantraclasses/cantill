@@ -67,8 +67,6 @@ export function Banner({ kind = 'info', children }) {
 
 export const Err = ({ e }) => (e ? <Banner kind="err">{e.message || String(e)}{e.body?.errors ? '\n• ' + e.body.errors.join('\n• ') : ''}</Banner> : null)
 
-export const Spinner = () => <span className="spinner" role="status" aria-label="Loading" />
-
 export function Empty({ icon = 'inboxempty', title, children }) {
   return <div className="empty"><Icon name={icon} size={36} /><b>{title}</b><div>{children}</div></div>
 }

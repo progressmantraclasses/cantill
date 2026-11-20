@@ -1,11 +1,10 @@
+"""SQLAlchemy ORM models. The connection itself lives in database.py."""
 from __future__ import annotations
 
-import os
-from datetime import datetime, date
+from datetime import date, datetime
 
-from sqlalchemy import (JSON, Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint,
-                        create_engine)
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, scoped_session, sessionmaker
+from sqlalchemy import JSON, Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
 class Base(DeclarativeBase):
@@ -133,19 +132,3 @@ class ChatSession(Base):
     messages: Mapped[list] = mapped_column(JSON, default=list)
     state: Mapped[str] = mapped_column(String(16), default="collecting")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-
-
-def make_engine(url: str | None = None):
-    url = url or os.environ.get("DATABASE_URL") or "sqlite:///cantill.db"
-    if url.startswith("postgres://"):
-        url = url.replace("postgres://", "postgresql+psycopg2://", 1)
-    elif url.startswith("postgresql://"):
-        url = url.replace("postgresql://", "postgresql+psycopg2://", 1)
-    kw = {"pool_pre_ping": True}
-    if url.startswith("sqlite"):
-        kw["connect_args"] = {"check_same_thread": False}
-    return create_engine(url, **kw)
-
-
-engine = make_engine()
-Session = scoped_session(sessionmaker(bind=engine, expire_on_commit=False))

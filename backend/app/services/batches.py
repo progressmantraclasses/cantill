@@ -1,13 +1,13 @@
 """Run the pure engine against DB state, serialise results, and handle approve / override."""
 from __future__ import annotations
 
+import csv
+import io
 from datetime import date, datetime, timedelta, timezone
-
-from sqlalchemy import select
 
 from .. import models as m
 from ..engine import loader, pipeline
-from ..seed import load_master_from_db, load_policies_from_db
+from ..repository import load_master_from_db, load_policies_from_db
 
 IST = timezone(timedelta(hours=5, minutes=30))
 
@@ -102,7 +102,6 @@ def create_batch_from_csv(session, name: str, data: bytes, actor: str, override:
 
 
 def csv_text(rows: list[dict]) -> str:
-    import csv, io
     buf = io.StringIO()
     w = csv.DictWriter(buf, fieldnames=pipeline.OUTPUT_COLUMNS, lineterminator="\n")
     w.writeheader()

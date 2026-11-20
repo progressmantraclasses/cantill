@@ -95,7 +95,6 @@ def regex_extract(text: str) -> dict:
         when = low
     if when:
         out["need_by_phrase"] = when
-    qty_m = re.search(rf"\b(\d[\d,]*(?:\.\d+)?)\s*({UNITS})?\b", re.sub(r"\b(?:by|on|before)\s+\d{{1,2}}\s*[a-z]{{3}}\w*", "", low))
     # take the first number that is not part of a date or plant code or spec like 6205
     for m in re.finditer(rf"\b(\d[\d,]*(?:\.\d+)?)\s*({UNITS})?\b", low_noprice):
         start = m.start()

@@ -103,8 +103,9 @@ cp ../.env.example .env                 # optional: edit it to add GEMINI_API_KE
 python -m uvicorn app.asgi:application --port 8000
 ```
 
-The API is now on http://localhost:8000/api/health. With `DATABASE_URL` empty it uses SQLite (`backend/cantill.db`),
-created and seeded automatically on first start. Delete that file to reset to the original kit data.
+The API is now on http://localhost:8000/api/health. Tables are created and seeded automatically on first start.
+With `DATABASE_URL` set (e.g. Supabase) it uses Postgres; with it empty it falls back to SQLite (`backend/cantill.db`) —
+delete that file to reset to the original kit data.
 
 **Run the tests** (from `backend/`, venv active):
 
@@ -136,7 +137,8 @@ All variables are listed in [`.env.example`](.env.example). For local runs copy 
 
 | Variable | Where | Default | Purpose |
 |---|---|---|---|
-| `DATABASE_URL` | backend | empty → SQLite | Postgres / Supabase connection string |
+| `DATABASE_URL` | backend | empty → SQLite | Postgres / Supabase runtime connection (transaction pooler, port 6543) |
+| `DIRECT_URL` | backend | empty | Optional session-pooler / direct connection (port 5432), used only to create tables |
 | `GEMINI_API_KEY` | backend | empty | Enables AI chat extraction, policy reading, contract-PDF fallback |
 | `GEMINI_MODEL` | backend | `gemini-2.5-flash` | Gemini model name |
 | `CORS_ORIGINS` | backend | `*` | Comma-separated origins allowed to call the API |
@@ -197,9 +199,10 @@ curl -X POST -H "X-User: me" -H "X-Role: Buyer" \
 
 ## Deploy (free tier)
 
-1. **Supabase** — create a project and copy the **pooler** connection string.
+1. **Supabase** — create a project and copy the **pooler** connection strings (6543 → `DATABASE_URL`,
+   5432 → `DIRECT_URL`). URL-encode special characters in the password (`+` → `%2B`, `%` → `%25`).
 2. **Render** (Web Service, Docker) — connect this repo; root = repo root, Dockerfile path `backend/Dockerfile`.
-   Env: `DATABASE_URL`, `GEMINI_API_KEY`, `CORS_ORIGINS=https://<your-vercel-app>.vercel.app`.
+   Env: `DATABASE_URL`, `DIRECT_URL`, `GEMINI_API_KEY`, `CORS_ORIGINS=https://<your-vercel-app>.vercel.app`.
    Tables and seed data are created on first start.
 3. **Vercel** — import this repo; project root `frontend`, framework **Vite**,
    env `VITE_API_URL=https://<render-service>.onrender.com`.
@@ -216,7 +219,9 @@ cantill/
 │   │   ├── policy/        policy schema, diff, amendments + v5_0.json
 │   │   ├── services/      LLM (Gemini), chat intake, PDF extraction
 │   │   ├── api/           Flask endpoints
+│   │   ├── database.py    engine, session, Supabase URL handling
 │   │   ├── models.py      SQLAlchemy models
+│   │   ├── repository.py  DB state → engine inputs (master data, policies)
 │   │   ├── seed.py        loads data/ on first start
 │   │   └── asgi.py        uvicorn entry point
 │   ├── tests/             pytest suite (engine + API)
@@ -228,8 +233,7 @@ cantill/
 │   ├── nginx.conf         static serving in the Docker image
 │   └── Dockerfile
 ├── data/                  kit data the app seeds from (master_data, contracts, pr_batches)
-├── master_data/ contracts/ pr_batches/   original task kit as delivered (same files as data/)
-├── *.pdf, README.txt      original task brief, policy v5.0 and worked examples
+├── *.pdf                  original task brief, policy v5.0 and worked examples
 ├── DECISIONS.md           judgement calls and why
 ├── APPROACH.md            architecture and approach
 ├── docker-compose.yml

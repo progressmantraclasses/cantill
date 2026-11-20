@@ -1,7 +1,6 @@
 """Turn an amendment document or a chat instruction into a proposed new policy JSON (a DRAFT a human must approve)."""
 from __future__ import annotations
 
-import copy
 import io
 import json
 import re
