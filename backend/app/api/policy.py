@@ -14,7 +14,7 @@ from ..policy import amend, diff as pdiff, normalise_policy, schema
 from ..repository import load_master_from_db, load_policies_from_db
 from ..services import batches as bsvc
 from ..services.llm import llm
-from .common import actor, err, require_role
+from .common import actor, err, json_body, require_role
 
 bp = Blueprint("policy", __name__, url_prefix="/api/policies")
 
@@ -177,7 +177,7 @@ def edit_draft(pid):
     pv = Session.get(m.PolicyVersion, pid)
     if not pv or pv.status != "draft":
         return err("draft not found", 404)
-    doc = (request.get_json(force=True) or {}).get("document")
+    doc = json_body().get("document")
     if not isinstance(doc, dict):
         return err("send {document: <policy json>}")
     who, role = actor()

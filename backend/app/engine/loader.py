@@ -69,11 +69,28 @@ def load_master(data_dir: str | Path, extra_contracts: list[dict] | None = None)
     return md
 
 
+PR_REQUIRED_COLUMNS = ("pr_no", "pr_line", "created_at", "plant", "quantity", "need_by_date")
+
+
+def _check_pr_columns(fieldnames: list[str] | None) -> None:
+    cols = {(c or "").strip() for c in fieldnames or []}
+    missing = [c for c in PR_REQUIRED_COLUMNS if c not in cols]
+    if "item_code" not in cols and "description" not in cols:
+        missing.append("item_code or description")
+    if missing:
+        raise ValueError(f"The CSV is missing required column(s): {', '.join(missing)}. "
+                         f"Expected the PR batch format: {', '.join(PR_REQUIRED_COLUMNS)}, item_code, description, …")
+
+
 def parse_pr_csv(text: str | bytes) -> tuple[list[dict], list[dict]]:
     """Returns (lines, rejected). Rejected rows are returned as NOT_PROCESSED candidates by the pipeline."""
     if isinstance(text, bytes):
-        text = text.decode("utf-8-sig")
+        try:
+            text = text.decode("utf-8-sig")
+        except UnicodeDecodeError as e:
+            raise ValueError("The file is not a UTF-8 text CSV. Save it as 'CSV UTF-8' and upload again.") from e
     reader = csv.DictReader(io.StringIO(text))
+    _check_pr_columns(reader.fieldnames)
     lines: list[dict] = []
     for i, r in enumerate(reader, start=2):
         r = {k.strip(): (v or "").strip() for k, v in r.items() if k}
@@ -107,4 +124,6 @@ def parse_pr_csv(text: str | bytes) -> tuple[list[dict], list[dict]]:
             line["need_by"] = None
             line["errors"].append("need_by_date is missing or unparseable")
         lines.append(line)
+    if not lines:
+        raise ValueError("The CSV has a header but no PR lines.")
     return lines, []

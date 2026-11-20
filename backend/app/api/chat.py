@@ -3,8 +3,7 @@ from __future__ import annotations
 import re
 import uuid
 
-from flask import Blueprint, jsonify, request
-from sqlalchemy import select
+from flask import Blueprint, jsonify
 from sqlalchemy.orm.attributes import flag_modified
 
 from .. import models as m
@@ -12,8 +11,9 @@ from ..database import Session
 from ..repository import load_master_from_db, policy_on
 from ..services import batches as bsvc
 from ..services import chat as chatsvc
+from ..services import requests as reqsvc
 from ..services.llm import llm
-from .common import actor, err
+from .common import actor, err, json_body
 
 bp = Blueprint("chat", __name__, url_prefix="/api/chat")
 
@@ -114,7 +114,7 @@ def _save(sess: m.ChatSession, role: str, text: str, extra: dict | None = None):
 
 @bp.post("")
 def turn():
-    body = request.get_json(force=True)
+    body = json_body()
     text = (body.get("message") or "").strip()
     who, _ = actor()
     sid = body.get("session_id")
@@ -160,7 +160,7 @@ def _resp(sess, step):
 
 @bp.post("/confirm")
 def confirm():
-    body = request.get_json(force=True)
+    body = json_body()
     sess = Session.get(m.ChatSession, body.get("session_id") or "")
     if not sess:
         return err("chat session not found", 404)
@@ -169,40 +169,20 @@ def confirm():
 
 
 def _confirm(sess: m.ChatSession, who: str):
-    slots = sess.slots
     items, _ = _items_and_params()
-    step = chatsvc.next_step(dict(slots), items, None, bsvc.now_ist().date())
+    step = chatsvc.next_step(dict(sess.slots), items, None, bsvc.now_ist().date())
     if step["state"] != "confirm":
         return jsonify({**_resp(sess, step), "error": "The request is not complete yet."}), 409
-    card = step["card"]
-    batch = Session.scalar(select(m.Batch).where(m.Batch.kind == "chat"))
-    if batch is None:
-        batch = m.Batch(name="Chat requests", kind="chat", created_by="chat", lines=[])
-        Session.add(batch)
-        Session.flush()
-    n = len(batch.lines) + 1
-    pr_no = f"PR-CH-{n:04d}"
-    now = bsvc.now_ist()
-    line = {"pr_no": pr_no, "pr_line": 1, "plant": card["plant"],
-            "item_code": "" if card["is_new"] else card["item_code"], "description": card["description"],
-            "uom": card["uom"], "department": "Chat", "requester": who if who != "anonymous" else (sess.requester or ""),
-            "urgency": card["urgency"], "quantity": card["quantity"], "estimated_unit_price": card["est_unit_price"],
-            "errors": [], "row": n, "force_new": card["is_new"],
-            "created_at": now.isoformat(sep=" "), "need_by": card["need_by"]}
-    batch.lines = list(batch.lines) + [line]
-    flag_modified(batch, "lines")
-    result = bsvc.run_batch(Session, batch)
-    req = next(r for r in result["requirements"] if any(l["pr_no"] == pr_no for l in r["lines"]))
-    bsvc.audit(Session, who, "Requester", "raise_pr", pr_no, detail={"route": req["route"], "chat": sess.id})
-    reply = (f"Raised **{pr_no}**. Procurement policy v{req['policy_version']} says: **{req['route'].replace('_', ' ')}**"
-             f" for the whole requirement worth ₹{req['value']:,.0f}. {req['reason']}")
+    requester = who if who != "anonymous" else (sess.requester or "")
+    out = reqsvc.raise_pr(Session, step["card"], requester, channel="chat")
+    req = out["requirement"]
+    bsvc.audit(Session, who, "Requester", "raise_pr", out["pr_no"], detail={"route": req["route"], "chat": sess.id})
+    reply = reqsvc.decision_reply(out["pr_no"], req)
     sess.slots, sess.state = {}, "collecting"
     _save(sess, "assistant", reply, {"decision": {k: req[k] for k in ("route", "decision", "value", "group_id", "reason")}})
     Session.commit()
-    return jsonify({"session_id": sess.id, "pr_no": pr_no, "reply": reply, "state": "done", "batch_id": batch.id,
-                    "decision": {k: req[k] for k in ("route", "decision", "value", "group_id", "supplier_id",
-                                                     "supplier_name", "unit_price", "suggested", "reason", "flags",
-                                                     "policy_version")}})
+    return jsonify({"session_id": sess.id, "pr_no": out["pr_no"], "reply": reply, "state": "done",
+                    "batch_id": out["batch_id"], "decision": out["decision"]})
 
 
 @bp.get("/<sid>")

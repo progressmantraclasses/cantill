@@ -4,19 +4,23 @@ from datetime import date, datetime
 
 from flask import Flask, jsonify, send_from_directory
 from flask_cors import CORS
+from werkzeug.exceptions import HTTPException
 
 from . import database, models, seed
-from .api import chat, core, policy
+from .api import chat, core, policy, requests
+
+MAX_UPLOAD_MB = 20
 
 
 def create_app() -> Flask:
     app = Flask(__name__, static_folder=None)
     app.json.default = lambda o: o.isoformat() if isinstance(o, (date, datetime)) else str(o)
     app.json.sort_keys = False
+    app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_MB * 1024 * 1024
 
     _configure_cors(app)
     _init_database()
-    for blueprint in (core.bp, policy.bp, chat.bp):
+    for blueprint in (core.bp, policy.bp, chat.bp, requests.bp):
         app.register_blueprint(blueprint)
     _register_handlers(app)
     _serve_frontend(app, os.environ.get("FRONTEND_DIST"))
@@ -43,9 +47,12 @@ def _register_handlers(app: Flask) -> None:
     def _cleanup(_exc):
         database.Session.remove()
 
-    @app.errorhandler(404)
-    def _not_found(_e):
-        return jsonify({"error": "not found"}), 404
+    @app.errorhandler(HTTPException)
+    def _http_error(e: HTTPException):
+        messages = {400: "The request could not be read (check that the body is valid JSON).",
+                    404: "not found", 405: "method not allowed",
+                    413: f"The file is too large. The limit is {MAX_UPLOAD_MB} MB."}
+        return jsonify({"error": messages.get(e.code, e.description)}), e.code
 
     @app.errorhandler(500)
     def _server_error(e):

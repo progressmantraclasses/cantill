@@ -1,9 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { api, inr, ROUTE_LABEL } from '../api.js'
-import { Banner, Button, Empty, Err, Field, Icon, Kpi, PageHeader, RouteChip, Skeleton, Tabs } from '../components.jsx'
+import { api, inr, ROUTE_LABEL, session } from '../api.js'
+import { Banner, Button, Empty, Err, Field, Icon, Kpi, PageHeader, RoleNotice, RouteChip, SkeletonSplit, Tabs } from '../components.jsx'
 
 const ROUTES = ['CONTRACT_PO', 'EMERGENCY_PO', 'SPOT_PO', 'RFQ', 'RFP', 'CAPEX_SOURCING', 'NEW_ITEM_SOURCING']
+const BUYER_ROLES = ['Buyer', 'Procurement']
 
 export default function Workspace() {
   const [batches, setBatches] = useState(null)
@@ -16,8 +17,13 @@ export default function Workspace() {
   const [error, setError] = useState(null)
   const [msg, setMsg] = useState(null)
   const [params, setParams] = useSearchParams()
+  const [suppliers, setSuppliers] = useState([])
+  const canAct = BUYER_ROLES.includes(session.role)
 
-  useEffect(() => { api.get('/api/batches').then((b) => { setBatches(b); if (b[0]) setBid(b[0].id) }).catch((e) => { setError(e); setBatches([]) }) }, [])
+  useEffect(() => {
+    api.get('/api/batches').then((b) => { setBatches(b); if (b[0]) setBid(b[0].id) }).catch((e) => { setError(e); setBatches([]) })
+    api.get('/api/suppliers').then(setSuppliers).catch(() => {})
+  }, [])
   const load = (id = bid) => id && api.get(`/api/requirements?batch_id=${id}`).then(setData).catch(setError)
   useEffect(() => { setSel(null); setData(null); load() }, [bid])
   // deep link: /workspace?req=REQ-0007 opens that requirement
@@ -49,7 +55,7 @@ export default function Workspace() {
 
   return (
     <div>
-      <PageHeader title="Buyer workspace" subtitle="Each requirement groups the PR lines that policy clubs together. Review the decision and its reason, then approve it or override it with a comment.">
+      <PageHeader icon="inbox" title="Buyer workspace" subtitle="Each requirement groups the PR lines that policy clubs together. Review the decision and its reason, then approve it or override it with a comment.">
         {batches?.length > 0 && <label className="field"><span>Batch</span>
           <select value={bid || ''} onChange={(e) => setBid(Number(e.target.value))}>
             {batches.map((b) => <option key={b.id} value={b.id}>#{b.id} · {b.name} ({b.summary?.requirements} requirements)</option>)}
@@ -57,22 +63,23 @@ export default function Workspace() {
       </PageHeader>
       <Err e={error} />
       {msg && <Banner kind="ok">{msg}</Banner>}
+      {data && <RoleNotice role={session.role} allowed={BUYER_ROLES} action="approve or override decisions" />}
 
       {batches?.length === 0 && <div className="card"><Empty icon="inbox" title="Nothing to review yet">Upload a PR batch or raise a request in chat.</Empty></div>}
 
       {data && (
         <>
           <div className="kpis">
-            <Kpi value={counts.pending} label="Awaiting action" onClick={() => setFilter('pending')} on={filter === 'pending'} />
-            <Kpi value={counts.done} label="Actioned" onClick={() => setFilter('done')} on={filter === 'done'} />
-            <Kpi value={all.length} label="All requirements" onClick={() => setFilter('all')} on={filter === 'all'} />
-            <Kpi value={counts.po} label="Purchase orders" />
-            <Kpi value={counts.src} label="Sourcing requests" />
-            <Kpi value={counts.flagged} label="With warnings" />
+            <Kpi icon="clock" tone="warn" value={counts.pending} label="Awaiting action" onClick={() => setFilter('pending')} on={filter === 'pending'} />
+            <Kpi icon="tick" tone="ok" value={counts.done} label="Actioned" onClick={() => setFilter('done')} on={filter === 'done'} />
+            <Kpi icon="layers" value={all.length} label="All requirements" onClick={() => setFilter('all')} on={filter === 'all'} />
+            <Kpi icon="fileSign" tone="ok" value={counts.po} label="Purchase orders" />
+            <Kpi icon="users" value={counts.src} label="Sourcing requests" />
+            <Kpi icon="flag" tone="bad" value={counts.flagged} label="With warnings" />
           </div>
           <div className="split">
             <section className="card flush" aria-label="Requirements">
-              <div className="row" style={{ padding: 12 }}>
+              <div className="toolbar">
                 <div className="search grow"><Icon name="search" size={16} /><input aria-label="Search requirements" placeholder="Search item, plant, supplier…" value={q} onChange={(e) => setQ(e.target.value)} /></div>
                 <select aria-label="Filter by route" value={routeF} onChange={(e) => setRouteF(e.target.value)}>
                   <option value="">All routes</option>{usedRoutes.map((r) => <option key={r} value={r}>{ROUTE_LABEL[r] || r}</option>)}
@@ -98,17 +105,17 @@ export default function Workspace() {
               </div>
               <div className="pager"><span className="muted small">{reqs.length} shown</span><span className="legend"><span><span className="dot" /> pending</span><span><span className="dot ok" /> actioned</span><span><Icon name="alert" size={13} /> has warnings</span></span></div>
             </section>
-            {cur ? <Detail r={cur} bid={bid} approve={approve} reload={load} setError={setError} setMsg={setMsg} /> :
+            {cur ? <Detail r={cur} bid={bid} approve={approve} reload={load} setError={setError} setMsg={setMsg} canAct={canAct} suppliers={suppliers} /> :
               <div className="card"><Empty icon="inbox" title="Select a requirement">Pick a row on the left to see the decision, the policy clause and the suppliers behind it.</Empty></div>}
           </div>
         </>
       )}
-      {batches && batches.length > 0 && !data && !error && <div className="card"><Skeleton rows={6} /></div>}
+      {(batches === null || (batches.length > 0 && !data)) && !error && <SkeletonSplit />}
     </div>
   )
 }
 
-function Detail({ r, bid, approve, reload, setError, setMsg }) {
+function Detail({ r, bid, approve, reload, setError, setMsg, canAct, suppliers }) {
   const [tab, setTab] = useState('overview')
   const [override, setOverride] = useState(false)
   const [route, setRoute] = useState(r.route)
@@ -177,15 +184,20 @@ function Detail({ r, bid, approve, reload, setError, setMsg }) {
               <h4 style={{ marginTop: 0 }}>Override decision</h4>
               <div className="row">
                 <Field label="New route"><select value={route} onChange={(e) => setRoute(e.target.value)}>{ROUTES.map((x) => <option key={x} value={x}>{ROUTE_LABEL[x]}</option>)}</select></Field>
-                {isPO && <Field label="Supplier (Active only)"><input value={supplier} onChange={(e) => setSupplier(e.target.value)} placeholder="e.g. S014" /></Field>}
+                {isPO && <Field label="Supplier (Active only)">
+                  <select value={supplier} onChange={(e) => setSupplier(e.target.value)}>
+                    <option value="">Choose a supplier…</option>
+                    {suppliers.filter((s) => s.status === 'Active').map((s) => <option key={s.supplier_id} value={s.supplier_id}>{s.supplier_id} · {s.name}</option>)}
+                  </select></Field>}
               </div>
-              <Field label="Reason (required, kept with the original decision)"><textarea value={comment} onChange={(e) => setComment(e.target.value)} /></Field>
-              <div className="row" style={{ marginTop: 10 }}><Button variant="primary" loading={busy} disabled={comment.trim().length < 5} onClick={submitOverride}>Save override</Button><Button onClick={() => setOverride(false)}>Cancel</Button></div>
+              <Field label="Reason (required, kept with the original decision)" hint={comment.trim().length < 5 ? 'At least 5 characters.' : null}><textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Why the system decision should change…" /></Field>
+              <div className="row" style={{ marginTop: 10 }}><Button variant="primary" icon="edit" loading={busy} disabled={comment.trim().length < 5 || (isPO && !supplier)} onClick={submitOverride}>Save override</Button><Button onClick={() => setOverride(false)}>Cancel</Button></div>
             </div>
           ) : (
             <div className="row">
-              <Button variant="primary" icon="check" loading={busy} onClick={doApprove}>{r.decision === 'PO' ? 'Approve & create PO' : `Approve & create ${r.route === 'CAPEX_SOURCING' ? 'capex request' : r.route === 'NEW_ITEM_SOURCING' ? 'sourcing request' : r.route}`}</Button>
-              <Button onClick={() => setOverride(true)}>Override…</Button>
+              <Button variant="primary" icon="check" loading={busy} disabled={!canAct} onClick={doApprove}>{r.decision === 'PO' ? 'Approve & create PO' : `Approve & create ${r.route === 'CAPEX_SOURCING' ? 'capex request' : r.route === 'NEW_ITEM_SOURCING' ? 'sourcing request' : r.route}`}</Button>
+              <Button icon="edit" disabled={!canAct} onClick={() => setOverride(true)}>Override…</Button>
+              {!canAct && <span className="muted small"><Icon name="lock" size={13} /> Buyer or Procurement only</span>}
             </div>
           )}
         </div>

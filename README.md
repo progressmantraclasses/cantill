@@ -151,7 +151,7 @@ Everything works without a Gemini key: regex chat extraction, the manual policy 
 
 | Screen | Who | Next action |
 |---|---|---|
-| Raise a request | Requester | chat, then **Confirm PR** |
+| Raise a request | Requester | chat, then **Confirm PR** — or **Raise PR manually** to fill in a form |
 | PR batches | Buyer | upload CSV → **Process batch** → **Export CSV** |
 | Buyer workspace | Buyer | **Approve** (creates PO / RFQ / RFP) or **Override** (comment required) |
 | Policy | Procurement | upload an amendment or describe a change → review changes + impact → **Approve** |
@@ -174,6 +174,7 @@ Pick your name and role at the bottom of the left menu (there is no login; see `
 | POST | `/api/policies/drafts/<id>/approve` | activate from its effective date (Procurement only) |
 | GET / POST | `/api/contracts`, `/api/contracts/extract` | register / add / extract from PDF |
 | POST | `/api/chat`, `/api/chat/confirm` | chat intake |
+| POST | `/api/prs` | manual PR form: `{item_code` or `is_new`+`description`, `quantity`, `plant`, `need_by`, `urgency`, `est_unit_price}` → decision |
 
 Send `X-User` and `X-Role` (`Requester` / `Buyer` / `Procurement`) headers; policy changes need `Procurement`.
 

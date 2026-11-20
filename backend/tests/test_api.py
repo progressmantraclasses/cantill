@@ -1,37 +1,8 @@
 import copy
 import csv
 import io
-import os
-import sys
-import tempfile
-from pathlib import Path
 
-import pytest
-
-ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "backend"))
-_tmp = tempfile.mkdtemp()
-os.environ["DATABASE_URL"] = f"sqlite:///{_tmp}/test.db"
-os.environ["DATA_DIR"] = str(ROOT / "data")
-os.environ.pop("GEMINI_API_KEY", None)
-
-from app import create_app  # noqa: E402
-
-PROC = {"X-User": "Asha", "X-Role": "Procurement"}
-BUYER = {"X-User": "Ravi", "X-Role": "Buyer"}
-SAMPLE = (ROOT / "data" / "pr_batches" / "sample_pr_batch.csv").read_bytes()
-
-
-@pytest.fixture(scope="module")
-def client():
-    return create_app().test_client()
-
-
-@pytest.fixture(scope="module")
-def batch(client):
-    r = client.post("/api/process-batch", data={"file": (io.BytesIO(SAMPLE), "sample.csv")}, headers=BUYER)
-    assert r.status_code == 200, r.data
-    return r.get_json()
+from conftest import BUYER, PROC, SAMPLE
 
 
 def test_process_batch_returns_decisions(batch):

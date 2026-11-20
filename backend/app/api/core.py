@@ -14,7 +14,9 @@ from ..repository import load_master_from_db, policy_on
 from ..services import batches as bsvc
 from ..services import contract_extract as ce
 from ..services.llm import llm
-from .common import actor, err
+from .common import actor, err, json_body, require_role
+
+BUYER_ROLES = ("Buyer", "Procurement")
 
 bp = Blueprint("core", __name__, url_prefix="/api")
 
@@ -84,7 +86,7 @@ def list_batches():
 @bp.get("/batches/<int:bid>")
 def get_batch(bid):
     b = Session.get(m.Batch, bid)
-    if not b:
+    if not b or not b.result:
         return err("batch not found", 404)
     return jsonify({"id": b.id, "name": b.name, "kind": b.kind, "processed_at": b.processed_at,
                     "summary": b.result["summary"], "decisions": b.result["rows"]})
@@ -110,7 +112,7 @@ def reprocess(bid):
 @bp.get("/batches/<int:bid>/export.csv")
 def export_batch(bid):
     b = Session.get(m.Batch, bid)
-    if not b:
+    if not b or not b.result:
         return err("batch not found", 404)
     return Response(bsvc.csv_text(b.result["rows"]), mimetype="text/csv",
                     headers={"Content-Disposition": f"attachment; filename=decisions_batch_{bid}.csv"})
@@ -148,6 +150,8 @@ def requirements():
 
 
 def _find_req(bid, key):
+    if not isinstance(bid, int) or not key:
+        return None, None
     b = Session.get(m.Batch, bid)
     if not b or not b.result:
         return None, None
@@ -156,7 +160,9 @@ def _find_req(bid, key):
 
 @bp.post("/requirements/approve")
 def approve():
-    body = request.get_json(force=True)
+    if denied := require_role(*BUYER_ROLES):
+        return denied
+    body = json_body()
     who, role = actor()
     b, r = _find_req(body.get("batch_id"), body.get("key"))
     if r is None:
@@ -185,7 +191,9 @@ def _decision_view(r):
 
 @bp.post("/requirements/override")
 def override():
-    body = request.get_json(force=True)
+    if denied := require_role(*BUYER_ROLES):
+        return denied
+    body = json_body()
     who, role = actor()
     comment = (body.get("comment") or "").strip()
     if len(comment) < 5:
@@ -286,7 +294,9 @@ def contract_extract():
 
 @bp.post("/contracts")
 def add_contract():
-    body = request.get_json(force=True)
+    if denied := require_role(*BUYER_ROLES):
+        return denied
+    body = json_body()
     who, role = actor()
     try:
         f = ce.to_contract_fields(body)
@@ -296,6 +306,12 @@ def add_contract():
         return err("Add at least one item rate.", 422)
     if f["end_date"] < f["start_date"]:
         return err("End date is before start date.", 422)
+    if f["value_cap"] <= 0:
+        return err("The value ceiling must be greater than zero.", 422)
+    if not 0 <= f["consumed_value"] <= f["value_cap"]:
+        return err("Consumed value must be between zero and the value ceiling.", 422)
+    if any(rate <= 0 for rate in f["lines"].values()):
+        return err("Every item rate must be greater than zero.", 422)
     if Session.get(m.Contract, f["contract_id"]):
         return err(f"{f['contract_id']} is already loaded.", 409)
     if not Session.get(m.Supplier, f["supplier_id"]):

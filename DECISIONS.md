@@ -153,7 +153,9 @@ All timestamps are treated as local plant time (IST); no time-zone conversion is
 ## M. Security and access
 
 No real login (out of scope for the task): a name and role are chosen in the UI and sent as headers. They are written to the
-audit log with the time. Roles are enforced on the server for policy changes (Procurement only). I would add SSO before real use.
+audit log with the time. Roles are enforced on the server: policy changes need Procurement; approving or overriding a
+decision and adding a contract need Buyer or Procurement (a Requester gets 403). Calls without a role header act as Buyer,
+so scripted batch runs keep working. I would add SSO before real use.
 
 ## N. Known limits
 
